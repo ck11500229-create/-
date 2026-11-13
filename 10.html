@@ -1,0 +1,1615 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>十重地獄：隱藏陷阱 2D 跑酷</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&display=swap');
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Noto Sans TC', sans-serif;
+      background-color: #0f172a;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    /* Custom scrollbar for level select modal */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.5);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.5);
+      border-radius: 3px;
+    }
+    @keyframes pulseGlow {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 15px rgba(250, 204, 21, 0.5); }
+      50% { transform: scale(1.03); box-shadow: 0 0 25px rgba(250, 204, 21, 0.85); }
+    }
+    .btn-glow {
+      animation: pulseGlow 2s infinite;
+    }
+  </style>
+</head>
+<body class="relative w-full h-full overflow-hidden text-white">
+
+  <!-- Main Game Canvas -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Top HUD Bar (Visible during gameplay) -->
+  <div id="hudBar" class="hidden absolute top-0 left-0 w-full p-3 sm:p-5 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-10">
+    <!-- Left: Level Info & Death Count -->
+    <div class="flex items-center gap-2 sm:gap-3 bg-slate-900/75 backdrop-blur-md border border-white/15 px-3.5 py-2 rounded-2xl shadow-lg">
+      <div id="hudLevelBadge" class="px-2.5 py-1 rounded-xl font-black text-xs sm:text-sm bg-amber-500 text-slate-950">
+        第 1 關
+      </div>
+      <div>
+        <div id="hudLevelName" class="font-bold text-sm sm:text-base leading-tight">沙漠</div>
+        <div class="text-xs text-slate-300 flex items-center gap-2">
+          <span>💀 陣亡：<strong id="hudDeaths" class="text-rose-400">0</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Distance Progress Bar (0 / 5000) -->
+    <div class="flex-1 max-w-md mx-auto bg-slate-900/75 backdrop-blur-md border border-white/15 px-4 py-2 rounded-2xl shadow-lg">
+      <div class="flex justify-between items-center text-xs sm:text-sm font-bold mb-1">
+        <span class="text-slate-300">推進距離 (無金幣純生存)</span>
+        <span class="text-amber-300 font-mono"><span id="hudDist">0</span> / 5000</span>
+      </div>
+      <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden border border-white/10">
+        <div id="hudProgressBar" class="h-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 transition-all duration-75" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Right: Controls (Sound & Menu) -->
+    <div class="flex items-center gap-2 pointer-events-auto">
+      <button id="btnToggleMute" title="音效開關" class="p-2.5 sm:p-3 bg-slate-900/80 hover:bg-slate-800 active:scale-95 backdrop-blur-md border border-white/15 rounded-2xl shadow-lg transition">
+        <span id="iconSound" class="text-base sm:text-lg">🔊</span>
+      </button>
+      <button id="btnOpenMenu" class="px-3.5 py-2.5 sm:px-4 sm:py-3 bg-slate-900/80 hover:bg-slate-800 active:scale-95 backdrop-blur-md border border-white/15 rounded-2xl font-bold text-xs sm:text-sm shadow-lg transition">
+        關卡選單
+      </button>
+    </div>
+  </div>
+
+  <!-- Mobile / On-Screen Jump Hint -->
+  <div id="jumpHint" class="hidden absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none text-xs sm:text-sm text-white/60 bg-black/40 px-4 py-1.5 rounded-full backdrop-blur-sm">
+    點擊畫面 / 按 [空白鍵] 或 [W / ↑] 跳躍（支援二段跳）
+  </div>
+
+  <!-- Level Clear Toast Banner (Auto-advances smoothly) -->
+  <div id="levelClearBanner" class="hidden absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none text-center bg-gradient-to-r from-amber-500/95 via-orange-500/95 to-rose-500/95 text-slate-950 px-6 py-4 rounded-3xl shadow-2xl border-2 border-white/60 transform transition-all">
+    <div class="text-xs font-black uppercase tracking-wider opacity-80">突破 5000 單位！</div>
+    <div id="bannerTitle" class="text-xl sm:text-2xl font-black mt-0.5">關卡突破！自動進入下一關</div>
+    <div id="bannerSub" class="text-xs sm:text-sm font-bold mt-1 text-slate-900">準備迎接更險惡的隱藏陷阱...</div>
+  </div>
+
+  <!-- Death / Retry Overlay -->
+  <div id="deathOverlay" class="hidden absolute inset-0 bg-rose-950/55 backdrop-blur-sm z-20 flex items-center justify-center p-4">
+    <div class="bg-slate-900/95 border border-rose-500/40 rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl transform transition-all">
+      <div class="text-4xl sm:text-5xl mb-2">💀</div>
+      <h2 class="text-2xl sm:text-3xl font-black text-rose-400">中陷阱啦！</h2>
+      <p id="deathReason" class="text-slate-300 text-sm sm:text-base mt-2 font-medium">你踩到了偽裝的隱藏機關</p>
+      <div class="mt-4 py-2.5 px-4 bg-slate-800/80 rounded-2xl border border-white/10 text-xs sm:text-sm text-slate-300 flex justify-between">
+        <span>本次距離：<strong id="deathDist" class="text-amber-300">0</strong> / 5000</span>
+        <span>本關陣亡：<strong id="deathCountModal" class="text-rose-400">1</strong> 次</span>
+      </div>
+      <div class="mt-6 flex flex-col gap-2.5">
+        <button id="btnRetry" class="w-full py-3.5 px-5 bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-400 hover:to-orange-400 active:scale-95 text-white font-black rounded-2xl shadow-lg text-base sm:text-lg transition cursor-pointer">
+          立即復活重試 (空白鍵)
+        </button>
+        <button id="btnDeathMenu" class="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold rounded-2xl text-sm transition cursor-pointer">
+          返回關卡選擇
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Menu / Level Select Overlay -->
+  <div id="menuOverlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-30 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div class="bg-slate-900/95 border border-white/15 rounded-3xl p-5 sm:p-8 max-w-3xl w-full shadow-2xl my-auto">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+        <div>
+          <span class="inline-block px-3 py-1 rounded-full text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-400/30 mb-1">
+            純粹生存・無金幣・10大主題
+          </span>
+          <h1 class="text-2xl sm:text-4xl font-black tracking-tight bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 bg-clip-text text-transparent">
+            十重地獄：隱藏陷阱跑酷
+          </h1>
+        </div>
+        <div class="text-xs sm:text-sm text-slate-300 bg-slate-800/80 px-3.5 py-2 rounded-2xl border border-white/10">
+          <div>🎯 每關跑滿 <strong class="text-amber-300">5000</strong> 自動解鎖下一關</div>
+          <div>👀 留意地板裂紋與色差，小心初見殺！</div>
+        </div>
+      </div>
+
+      <!-- 10 Levels Grid -->
+      <div class="mt-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm sm:text-base font-bold text-slate-200">選擇關卡 (已解鎖 <span id="unlockedCountText" class="text-amber-400">1</span> / 10 關)</h3>
+          <button id="btnResetProgress" class="text-xs text-slate-400 hover:text-rose-400 underline transition cursor-pointer">
+            重置進度
+          </button>
+        </div>
+
+        <div id="levelGrid" class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
+          <!-- Populated dynamically via JS -->
+        </div>
+      </div>
+
+      <!-- Bottom Action -->
+      <div class="mt-6 pt-4 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div class="text-xs text-slate-400 text-center sm:text-left">
+          操作方式：點擊螢幕 / 按 <kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-600 text-slate-200">空白鍵</kbd> 或 <kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-600 text-slate-200">↑ / W</kbd> 跳躍（空中可二段跳）
+        </div>
+        <button id="btnStartCurrent" class="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 active:scale-95 text-slate-950 font-black rounded-2xl text-base sm:text-lg shadow-xl btn-glow transition cursor-pointer">
+          開始挑戰第 <span id="startBtnLevelNum">1</span> 關
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- All 10 Levels Victory Modal -->
+  <div id="victoryOverlay" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md z-40 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border-2 border-amber-400/60 rounded-3xl p-6 sm:p-10 max-w-md w-full text-center shadow-2xl">
+      <div class="text-5xl sm:text-6xl mb-3">🏆</div>
+      <h2 class="text-2xl sm:text-3xl font-black text-amber-300">全 10 關制霸！</h2>
+      <p class="text-slate-300 text-sm sm:text-base mt-3 leading-relaxed">
+        太神啦！你成功穿越了沙漠、冰原、沼澤、水泥地、天空、高山、蛇肚、暗夜城堡、遠古神廟與最終綜合地獄，識破了所有隱藏陷阱！
+      </p>
+      <div class="mt-5 p-3.5 bg-slate-800/90 rounded-2xl border border-white/10 text-sm">
+        總陣亡次數：<strong id="totalDeathsVictory" class="text-rose-400 text-lg">0</strong> 次
+      </div>
+      <button id="btnVictoryMenu" class="mt-6 w-full py-3.5 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black rounded-2xl text-base sm:text-lg shadow-lg hover:brightness-110 transition cursor-pointer">
+        返回關卡選單自由挑戰
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * 十重地獄：隱藏陷阱 2D 跑酷遊戲
+     * 核心特色：
+     * - 10 大指定主題關卡：沙漠、冰原、沼澤、水泥地、天空、山、蛇的肚子、暗夜城堡、遠古神廟、綜合
+     * - 沒有金幣，純粹閃避與識破偽裝陷阱
+     * - 每關距離達 5000 單位自動解鎖並進入下一關
+     */
+
+    // ==========================================
+    // 1. 音效合成器 (Web Audio API - 無需外部音檔)
+    // ==========================================
+    class SoundFX {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) this.ctx = new AudioContext();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playJump(isDouble = false) {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = isDouble ? 'triangle' : 'sine';
+        const startFreq = isDouble ? 360 : 220;
+        const endFreq = isDouble ? 680 : 460;
+        osc.frequency.setValueAtTime(startFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.14);
+
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      }
+
+      playTrapTrigger() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.linearRampToValueAtTime(90, now + 0.09);
+
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      }
+
+      playDeath() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.35);
+
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.36);
+      }
+
+      playLevelClear() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        notes.forEach((freq, i) => {
+          const now = this.ctx.currentTime + i * 0.09;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.26);
+        });
+      }
+    }
+
+    const sfx = new SoundFX();
+
+    // ==========================================
+    // 2. 10 個關卡的主題與陷阱設定
+    // ==========================================
+    const LEVELS = [
+      {
+        id: 1,
+        name: '沙漠',
+        icon: '🏜️',
+        desc: '流沙塌陷地板、偽裝仙人掌地刺',
+        bgTop: '#f59e0b',
+        bgBottom: '#fef3c7',
+        groundTop: '#d97706',
+        groundBody: '#92400e',
+        accent: '#fbbf24',
+        speed: 370,
+        gravity: 1950,
+        jumpForce: -720,
+        traps: ['crumble', 'popup_spike', 'pit'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'desert'
+      },
+      {
+        id: 2,
+        name: '冰原',
+        icon: '❄️',
+        desc: '頭頂墜落冰錐、易碎假冰橋、低重力滑行',
+        bgTop: '#0284c7',
+        bgBottom: '#e0f2fe',
+        groundTop: '#bae6fd',
+        groundBody: '#0369a1',
+        accent: '#38bdf8',
+        speed: 395,
+        gravity: 1750,
+        jumpForce: -700,
+        traps: ['falling_block', 'crumble', 'popup_spike'],
+        darkness: false,
+        icePhysics: true,
+        bgStyle: 'ice'
+      },
+      {
+        id: 3,
+        name: '沼澤',
+        icon: '🐊',
+        desc: '毒沼突刺、黏稠泥沼減速陷阱、隱形阻擋磚',
+        bgTop: '#14532d',
+        bgBottom: '#3f6212',
+        groundTop: '#4d7c0f',
+        groundBody: '#1a2e05',
+        accent: '#a3e635',
+        speed: 385,
+        gravity: 1950,
+        jumpForce: -720,
+        traps: ['popup_spike', 'invis_block', 'pit', 'crumble'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'swamp'
+      },
+      {
+        id: 4,
+        name: '水泥地',
+        icon: '🏗️',
+        desc: '工地高空落石、地板暴衝圓鋸、塌陷鷹架',
+        bgTop: '#334155',
+        bgBottom: '#94a3b8',
+        groundTop: '#64748b',
+        groundBody: '#1e293b',
+        accent: '#f97316',
+        speed: 415,
+        gravity: 2050,
+        jumpForce: -740,
+        traps: ['sawblade', 'falling_block', 'crumble', 'pit'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'concrete'
+      },
+      {
+        id: 5,
+        name: '天空',
+        icon: '☁️',
+        desc: '一踩即散雲朵平台、高空落雷塊、空中隱形磚',
+        bgTop: '#2563eb',
+        bgBottom: '#93c5fd',
+        groundTop: '#ffffff',
+        groundBody: '#cbd5e1',
+        accent: '#fde047',
+        speed: 420,
+        gravity: 1820,
+        jumpForce: -720,
+        traps: ['crumble', 'invis_block', 'falling_block', 'pit'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'sky'
+      },
+      {
+        id: 6,
+        name: '山',
+        icon: '⛰️',
+        desc: '山崩滾石襲擊、懸崖碎裂岩塊、突發岩刺',
+        bgTop: '#44403c',
+        bgBottom: '#a8a29e',
+        groundTop: '#78716c',
+        groundBody: '#292524',
+        accent: '#fb923c',
+        speed: 435,
+        gravity: 2050,
+        jumpForce: -745,
+        traps: ['rolling_boulder', 'crumble', 'popup_spike', 'pit'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'mountain'
+      },
+      {
+        id: 7,
+        name: '蛇的肚子',
+        icon: '🐍',
+        desc: '強酸消化液池、突襲利齒、蠕動塌陷肉壁',
+        bgTop: '#4c0519',
+        bgBottom: '#9f1239',
+        groundTop: '#e11d48',
+        groundBody: '#881337',
+        accent: '#fda4af',
+        speed: 445,
+        gravity: 1980,
+        jumpForce: -740,
+        traps: ['popup_spike', 'falling_block', 'crumble', 'sawblade'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'snake'
+      },
+      {
+        id: 8,
+        name: '暗夜城堡',
+        icon: '🏰',
+        desc: '極限微光視野！黑暗中潛伏幽靈刺與墜落吊燈',
+        bgTop: '#090d16',
+        bgBottom: '#1e1b4b',
+        groundTop: '#4338ca',
+        groundBody: '#1e1b4b',
+        accent: '#c084fc',
+        speed: 440,
+        gravity: 2000,
+        jumpForce: -740,
+        traps: ['popup_spike', 'invis_block', 'falling_block', 'pit'],
+        darkness: true,
+        icePhysics: false,
+        bgStyle: 'castle'
+      },
+      {
+        id: 9,
+        name: '遠古神廟',
+        icon: '🏛️',
+        desc: '機關毒箭連射、神廟石像重壓、偽裝地板',
+        bgTop: '#422006',
+        bgBottom: '#854d0e',
+        groundTop: '#ca8a04',
+        groundBody: '#713f12',
+        accent: '#4ade80',
+        speed: 465,
+        gravity: 2080,
+        jumpForce: -755,
+        traps: ['dart', 'falling_block', 'popup_spike', 'crumble'],
+        darkness: false,
+        icePhysics: false,
+        bgStyle: 'temple'
+      },
+      {
+        id: 10,
+        name: '綜合地獄',
+        icon: '🔥',
+        desc: '全關卡陷阱總動員！毒箭、滾石、隱形磚與視線干擾',
+        bgTop: '#18181b',
+        bgBottom: '#7f1d1d',
+        groundTop: '#ef4444',
+        groundBody: '#450a0a',
+        accent: '#facc15',
+        speed: 495,
+        gravity: 2100,
+        jumpForce: -760,
+        traps: ['dart', 'rolling_boulder', 'invis_block', 'popup_spike', 'falling_block', 'crumble', 'sawblade'],
+        darkness: 'pulse',
+        icePhysics: false,
+        bgStyle: 'finale'
+      }
+    ];
+
+    const TARGET_DISTANCE = 5000;
+    const STORAGE_KEY = 'parkour_10_levels_save_v1';
+
+    // ==========================================
+    // 3. 遊戲狀態與存檔管理
+    // ==========================================
+    let saveData = {
+      unlockedLevel: 1,
+      totalDeaths: 0,
+      levelDeaths: {}
+    };
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        saveData = { ...saveData, ...parsed };
+      }
+    } catch (e) {
+      console.warn('無法讀取存檔，使用預設進度');
+    }
+
+    function persistSave() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
+      } catch (e) {}
+    }
+
+    // Canvas & Rendering Setup
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+
+    function resizeCanvas() {
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W;
+      canvas.height = H;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Game Runtime State
+    let gameState = 'MENU'; // 'MENU', 'PLAYING', 'DEAD', 'VICTORY'
+    let currentLevelIdx = 0; // 0 to 9
+    let distance = 0;
+    let cameraX = 0;
+    let screenShake = 0;
+    let levelBannerTimer = 0;
+    let lastTime = 0;
+
+    // Player Object
+    const player = {
+      x: 140,
+      y: 0,
+      w: 34,
+      h: 44,
+      vy: 0,
+      vxOffset: 0,
+      jumpsLeft: 2,
+      grounded: false,
+      squashX: 1,
+      squashY: 1,
+      runCycle: 0,
+      trail: []
+    };
+
+    // World Entities
+    let segments = []; // 地面區塊 { x, w, y, type: 'normal'|'crumble'|'pit', triggered, timer, fallY }
+    let traps = [];    // 陷阱物件 { type, x, y, w, h, triggered, state, vx, vy, baseY }
+    let particles = [];
+    let bgDecor = [];
+    let nextGenX = 0;
+
+    // ==========================================
+    // 4. DOM 元素綁定
+    // ==========================================
+    const hudBar = document.getElementById('hudBar');
+    const hudLevelBadge = document.getElementById('hudLevelBadge');
+    const hudLevelName = document.getElementById('hudLevelName');
+    const hudDeaths = document.getElementById('hudDeaths');
+    const hudDist = document.getElementById('hudDist');
+    const hudProgressBar = document.getElementById('hudProgressBar');
+    const jumpHint = document.getElementById('jumpHint');
+
+    const levelClearBanner = document.getElementById('levelClearBanner');
+    const bannerTitle = document.getElementById('bannerTitle');
+    const bannerSub = document.getElementById('bannerSub');
+
+    const deathOverlay = document.getElementById('deathOverlay');
+    const deathReason = document.getElementById('deathReason');
+    const deathDist = document.getElementById('deathDist');
+    const deathCountModal = document.getElementById('deathCountModal');
+
+    const menuOverlay = document.getElementById('menuOverlay');
+    const levelGrid = document.getElementById('levelGrid');
+    const unlockedCountText = document.getElementById('unlockedCountText');
+    const startBtnLevelNum = document.getElementById('startBtnLevelNum');
+
+    const victoryOverlay = document.getElementById('victoryOverlay');
+    const totalDeathsVictory = document.getElementById('totalDeathsVictory');
+
+    // ==========================================
+    // 5. 關卡選單 UI 渲染
+    // ==========================================
+    function renderLevelGrid() {
+      levelGrid.innerHTML = '';
+      unlockedCountText.textContent = saveData.unlockedLevel;
+      startBtnLevelNum.textContent = currentLevelIdx + 1;
+
+      LEVELS.forEach((lvl, idx) => {
+        const isUnlocked = lvl.id <= saveData.unlockedLevel;
+        const isSelected = idx === currentLevelIdx;
+        const deaths = saveData.levelDeaths[lvl.id] || 0;
+
+        const card = document.createElement('button');
+        card.disabled = !isUnlocked;
+        card.className = `relative text-left p-3 rounded-2xl border transition flex flex-col justify-between min-h-[104px] ${
+          isUnlocked
+            ? isSelected
+              ? 'bg-gradient-to-br from-amber-500/25 to-orange-500/20 border-amber-400 shadow-lg shadow-amber-500/10 cursor-pointer'
+              : 'bg-slate-800/80 hover:bg-slate-800 border-white/10 hover:border-white/30 cursor-pointer'
+            : 'bg-slate-900/60 border-white/5 opacity-50 cursor-not-allowed'
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between w-full">
+            <span class="text-xs font-black px-2 py-0.5 rounded-lg ${isUnlocked ? 'bg-white/10 text-amber-300' : 'bg-slate-800 text-slate-500'}">
+              第 ${lvl.id} 關
+            </span>
+            <span class="text-lg">${isUnlocked ? lvl.icon : '🔒'}</span>
+          </div>
+          <div class="mt-1.5">
+            <div class="font-black text-sm sm:text-base text-white truncate">${lvl.name}</div>
+            <div class="text-[11px] text-slate-400 line-clamp-1 mt-0.5">${isUnlocked ? lvl.desc : '前關達 5000 解鎖'}</div>
+          </div>
+          ${isUnlocked && deaths > 0 ? `<div class="text-[10px] text-rose-400 mt-1 font-bold">💀 陣亡 ${deaths} 次</div>` : ''}
+        `;
+
+        if (isUnlocked) {
+          card.addEventListener('click', () => {
+            currentLevelIdx = idx;
+            startLevel(idx);
+          });
+        }
+        levelGrid.appendChild(card);
+      });
+    }
+
+    // ==========================================
+    // 6. 關卡與隱藏陷阱生成器
+    // ==========================================
+    function getBaseFloorY() {
+      return Math.round(H * 0.74);
+    }
+
+    function initBgDecor(lvl) {
+      bgDecor = [];
+      for (let i = 0; i < 18; i++) {
+        bgDecor.push({
+          x: Math.random() * W * 1.5,
+          y: Math.random() * H * 0.65,
+          size: 20 + Math.random() * 80,
+          speedFactor: 0.15 + Math.random() * 0.35,
+          variant: Math.floor(Math.random() * 3)
+        });
+      }
+    }
+
+    function startLevel(idx, keepBanner = false) {
+      currentLevelIdx = idx;
+      const lvl = LEVELS[currentLevelIdx];
+
+      distance = 0;
+      cameraX = 0;
+      screenShake = 0;
+      segments = [];
+      traps = [];
+      particles = [];
+
+      const floorY = getBaseFloorY();
+      player.x = Math.min(160, W * 0.22);
+      player.y = floorY - player.h;
+      player.vy = 0;
+      player.vxOffset = 0;
+      player.jumpsLeft = 2;
+      player.grounded = true;
+      player.squashX = 1;
+      player.squashY = 1;
+      player.trail = [];
+
+      // 起始安全跑道 (前 650px 無陷阱讓玩家進入節奏)
+      segments.push({
+        x: -100,
+        w: 850,
+        y: floorY,
+        type: 'normal',
+        triggered: false,
+        timer: 0,
+        fallY: 0
+      });
+      nextGenX = 750;
+
+      initBgDecor(lvl);
+      generateChunksAhead();
+
+      // UI 更新
+      menuOverlay.classList.add('hidden');
+      deathOverlay.classList.add('hidden');
+      victoryOverlay.classList.add('hidden');
+      hudBar.classList.remove('hidden');
+      jumpHint.classList.remove('hidden');
+
+      if (!keepBanner) {
+        levelClearBanner.classList.add('hidden');
+      }
+
+      hudLevelBadge.textContent = `第 ${lvl.id} 關`;
+      hudLevelName.textContent = `${lvl.icon} ${lvl.name}`;
+      hudDeaths.textContent = saveData.levelDeaths[lvl.id] || 0;
+      updateHudDistance();
+
+      gameState = 'PLAYING';
+      sfx.init();
+    }
+
+    function generateChunksAhead() {
+      const lvl = LEVELS[currentLevelIdx];
+      const floorY = getBaseFloorY();
+
+      while (nextGenX < cameraX + W + 900) {
+        const trapPool = lvl.traps;
+        const chosenTrap = trapPool[Math.floor(Math.random() * trapPool.length)];
+        const segWidth = 220 + Math.floor(Math.random() * 180);
+
+        // 1. 深淵坑洞陷阱 (pit)
+        if (chosenTrap === 'pit') {
+          const pitWidth = 105 + Math.floor(Math.random() * 55);
+          // 坑洞前正常地面
+          segments.push({
+            x: nextGenX,
+            w: 180,
+            y: floorY,
+            type: 'normal',
+            triggered: false,
+            timer: 0,
+            fallY: 0
+          });
+          nextGenX += 180 + pitWidth;
+
+          // 35% 機率在坑洞正上方放一顆「陰險隱形磚」，專抓跳太高的玩家！
+          if (Math.random() < 0.38 && trapPool.includes('invis_block')) {
+            traps.push({
+              type: 'invis_block',
+              x: nextGenX - pitWidth * 0.65,
+              y: floorY - 145,
+              w: 42,
+              h: 42,
+              triggered: false,
+              revealed: false
+            });
+          }
+          continue;
+        }
+
+        // 2. 偽裝塌陷地板 (crumble) - 外觀有細微裂痕線索，踩到 0.16 秒後墜落
+        if (chosenTrap === 'crumble') {
+          const crumbleW = 120 + Math.floor(Math.random() * 50);
+          segments.push({
+            x: nextGenX,
+            w: crumbleW,
+            y: floorY,
+            type: 'crumble',
+            triggered: false,
+            timer: 0,
+            fallY: 0
+          });
+          nextGenX += crumbleW;
+          // 接一塊安全著陸區
+          segments.push({
+            x: nextGenX,
+            w: 190,
+            y: floorY,
+            type: 'normal',
+            triggered: false,
+            timer: 0,
+            fallY: 0
+          });
+          nextGenX += 190;
+          continue;
+        }
+
+        // 其他陷阱建立在正常地面上
+        const heightOffset = (Math.random() < 0.25) ? -35 : 0; // 偶爾有高低差台階
+        const segY = floorY + heightOffset;
+        segments.push({
+          x: nextGenX,
+          w: segWidth,
+          y: segY,
+          type: 'normal',
+          triggered: false,
+          timer: 0,
+          fallY: 0
+        });
+
+        const midX = nextGenX + segWidth * 0.55;
+
+        if (chosenTrap === 'popup_spike') {
+          // 隱藏地刺：平時只露出一點點微弱尖端（色差提示），靠近瞬間彈出！
+          traps.push({
+            type: 'popup_spike',
+            x: midX,
+            y: segY,
+            w: 44,
+            h: 36,
+            triggered: false,
+            extend: 0 // 0 ~ 1
+          });
+        } else if (chosenTrap === 'falling_block') {
+          // 頭頂突襲落石/冰錐/吊燈：平時懸在上方，玩家接近時急墜
+          traps.push({
+            type: 'falling_block',
+            x: midX + 30,
+            y: segY - 240,
+            baseY: segY - 240,
+            targetY: segY - 46,
+            w: 46,
+            h: 46,
+            triggered: false,
+            vy: 0
+          });
+        } else if (chosenTrap === 'invis_block') {
+          // 隱形撞頭磚：玩家起跳路徑上突然出現實體方塊把玩家撞下去
+          traps.push({
+            type: 'invis_block',
+            x: midX,
+            y: segY - 115,
+            w: 44,
+            h: 44,
+            triggered: false,
+            revealed: false
+          });
+          // 隱形磚後面常搭配一個地刺增加心理戰
+          traps.push({
+            type: 'popup_spike',
+            x: midX + 55,
+            y: segY,
+            w: 38,
+            h: 32,
+            triggered: true,
+            extend: 1
+          });
+        } else if (chosenTrap === 'sawblade') {
+          // 暴衝圓鋸：玩家靠近時從地底彈出並逆向滾動
+          traps.push({
+            type: 'sawblade',
+            x: nextGenX + segWidth - 30,
+            y: segY,
+            r: 22,
+            triggered: false,
+            vx: 0,
+            angle: 0
+          });
+        } else if (chosenTrap === 'rolling_boulder') {
+          // 高速滾石
+          traps.push({
+            type: 'rolling_boulder',
+            x: nextGenX + segWidth + 60,
+            y: segY - 28,
+            r: 28,
+            triggered: false,
+            vx: 0,
+            angle: 0
+          });
+        } else if (chosenTrap === 'dart') {
+          // 遠古毒箭：從右側發射器高速射出
+          traps.push({
+            type: 'dart',
+            x: nextGenX + segWidth + 120,
+            y: segY - (Math.random() < 0.5 ? 24 : 78), // 低箭或高箭（考驗小跳或二段跳）
+            w: 42,
+            h: 10,
+            triggered: false,
+            vx: 0
+          });
+        }
+
+        nextGenX += segWidth;
+      }
+    }
+
+    // ==========================================
+    // 7. 粒子特效與玩家操作
+    // ==========================================
+    function spawnParticles(x, y, color, count = 10, speedScale = 1) {
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = (60 + Math.random() * 220) * speedScale;
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 60,
+          size: 3 + Math.random() * 5,
+          color,
+          life: 0.35 + Math.random() * 0.35,
+          maxLife: 0.7
+        });
+      }
+    }
+
+    function handleJumpAction() {
+      if (gameState === 'DEAD') {
+        startLevel(currentLevelIdx);
+        return;
+      }
+      if (gameState !== 'PLAYING') return;
+
+      const lvl = LEVELS[currentLevelIdx];
+      if (player.jumpsLeft > 0) {
+        const isDouble = !player.grounded && player.jumpsLeft === 1;
+        player.vy = lvl.jumpForce * (isDouble ? 0.92 : 1.0);
+        player.grounded = false;
+        player.jumpsLeft--;
+        player.squashX = 0.72;
+        player.squashY = 1.32;
+
+        sfx.playJump(isDouble);
+        spawnParticles(
+          player.x + player.w / 2,
+          player.y + player.h,
+          isDouble ? '#fde047' : '#ffffff',
+          isDouble ? 12 : 7,
+          0.7
+        );
+      }
+    }
+
+    // Input Listeners (Keyboard, Mouse, Touch)
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+        e.preventDefault();
+        if (gameState === 'MENU') {
+          startLevel(currentLevelIdx);
+        } else {
+          handleJumpAction();
+        }
+      } else if (e.code === 'Escape' && gameState === 'PLAYING') {
+        openMenu();
+      }
+    });
+
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      handleJumpAction();
+    });
+
+    document.getElementById('btnStartCurrent').addEventListener('click', () => {
+      startLevel(currentLevelIdx);
+    });
+    document.getElementById('btnRetry').addEventListener('click', () => {
+      startLevel(currentLevelIdx);
+    });
+    document.getElementById('btnOpenMenu').addEventListener('click', openMenu);
+    document.getElementById('btnDeathMenu').addEventListener('click', openMenu);
+    document.getElementById('btnVictoryMenu').addEventListener('click', openMenu);
+
+    document.getElementById('btnToggleMute').addEventListener('click', () => {
+      sfx.muted = !sfx.muted;
+      document.getElementById('iconSound').textContent = sfx.muted ? '🔇' : '🔊';
+    });
+
+    document.getElementById('btnResetProgress').addEventListener('click', () => {
+      saveData = { unlockedLevel: 1, totalDeaths: 0, levelDeaths: {} };
+      currentLevelIdx = 0;
+      persistSave();
+      renderLevelGrid();
+    });
+
+    function openMenu() {
+      gameState = 'MENU';
+      hudBar.classList.add('hidden');
+      jumpHint.classList.add('hidden');
+      deathOverlay.classList.add('hidden');
+      victoryOverlay.classList.add('hidden');
+      levelClearBanner.classList.add('hidden');
+      menuOverlay.classList.remove('hidden');
+      renderLevelGrid();
+    }
+
+    // ==========================================
+    // 8. 死亡與過關判定
+    // ==========================================
+    function triggerDeath(reasonText) {
+      if (gameState !== 'PLAYING') return;
+      gameState = 'DEAD';
+      screenShake = 18;
+      sfx.playDeath();
+
+      const lvl = LEVELS[currentLevelIdx];
+      saveData.totalDeaths = (saveData.totalDeaths || 0) + 1;
+      saveData.levelDeaths[lvl.id] = (saveData.levelDeaths[lvl.id] || 0) + 1;
+      persistSave();
+
+      hudDeaths.textContent = saveData.levelDeaths[lvl.id];
+      spawnParticles(player.x + player.w / 2, player.y + player.h / 2, '#fb7185', 28, 1.4);
+
+      deathReason.textContent = reasonText;
+      deathDist.textContent = Math.floor(distance);
+      deathCountModal.textContent = saveData.levelDeaths[lvl.id];
+      deathOverlay.classList.remove('hidden');
+    }
+
+    function handleLevelClear() {
+      sfx.playLevelClear();
+      const completedLvl = LEVELS[currentLevelIdx];
+
+      // 解鎖下一關
+      if (completedLvl.id < 10) {
+        const nextIdx = currentLevelIdx + 1;
+        if (saveData.unlockedLevel < nextIdx + 1) {
+          saveData.unlockedLevel = nextIdx + 1;
+          persistSave();
+        }
+
+        // 顯示突破橫幅並自動無縫進入下一關！
+        const nextLvl = LEVELS[nextIdx];
+        bannerTitle.textContent = `🎉 第 ${completedLvl.id} 關「${completedLvl.name}」突破！`;
+        bannerSub.textContent = `自動解鎖並進入第 ${nextLvl.id} 關：${nextLvl.icon} ${nextLvl.name}`;
+        levelClearBanner.classList.remove('hidden');
+        levelBannerTimer = 3.2;
+
+        startLevel(nextIdx, true);
+      } else {
+        // 第 10 關破關 -> 全破畫面
+        gameState = 'VICTORY';
+        hudBar.classList.add('hidden');
+        jumpHint.classList.add('hidden');
+        totalDeathsVictory.textContent = saveData.totalDeaths;
+        victoryOverlay.classList.remove('hidden');
+      }
+    }
+
+    function updateHudDistance() {
+      const d = Math.min(TARGET_DISTANCE, Math.floor(distance));
+      hudDist.textContent = d;
+      hudProgressBar.style.width = `${(d / TARGET_DISTANCE) * 100}%`;
+    }
+
+    // ==========================================
+    // 9. 主物理與陷阱更新迴圈
+    // ==========================================
+    function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+      return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    function circleRectOverlap(cx, cy, cr, rx, ry, rw, rh) {
+      const closestX = Math.max(rx, Math.min(cx, rx + rw));
+      const closestY = Math.max(ry, Math.min(cy, ry + rh));
+      const dx = cx - closestX;
+      const dy = cy - closestY;
+      return (dx * dx + dy * dy) < (cr * cr);
+    }
+
+    function update(dt) {
+      // 更新背景裝飾
+      const lvl = LEVELS[currentLevelIdx];
+      const activeSpeed = gameState === 'PLAYING' ? lvl.speed : 120;
+
+      bgDecor.forEach((d) => {
+        d.x -= activeSpeed * d.speedFactor * dt;
+        if (d.x + d.size < -100) {
+          d.x = W + 100 + Math.random() * 200;
+          d.y = Math.random() * H * 0.65;
+        }
+      });
+
+      // 更新粒子
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 600 * dt;
+        p.life -= dt;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+
+      if (screenShake > 0) {
+        screenShake = Math.max(0, screenShake - dt * 60);
+      }
+
+      if (levelBannerTimer > 0) {
+        levelBannerTimer -= dt;
+        if (levelBannerTimer <= 0) {
+          levelClearBanner.classList.add('hidden');
+        }
+      }
+
+      if (gameState !== 'PLAYING') return;
+
+      // 推進距離與攝影機
+      const moveStep = lvl.speed * dt;
+      cameraX += moveStep;
+      distance += moveStep * 0.36; // 調整單位比例，約跑 28~35 秒達 5000 單位，節奏緊湊刺激
+      updateHudDistance();
+
+      // 檢查是否達成 5000 單位自動解鎖下一關！
+      if (distance >= TARGET_DISTANCE) {
+        handleLevelClear();
+        return;
+      }
+
+      generateChunksAhead();
+
+      // 玩家垂直物理
+      const prevY = player.y;
+      player.vy += lvl.gravity * dt;
+      player.y += player.vy * dt;
+      player.runCycle += dt * 16;
+
+      // 擠壓彈性恢復
+      player.squashX += (1 - player.squashX) * Math.min(1, dt * 14);
+      player.squashY += (1 - player.squashY) * Math.min(1, dt * 14);
+
+      // 殘影軌跡
+      player.trail.push({ x: player.x, y: player.y, alpha: 0.45 });
+      if (player.trail.length > 7) player.trail.shift();
+      player.trail.forEach(t => {
+        t.x -= moveStep;
+        t.alpha *= 0.85;
+      });
+
+      const playerWorldX = cameraX + player.x;
+      let onGround = false;
+
+      // 1. 地面區塊碰撞與塌陷邏輯
+      for (let i = segments.length - 1; i >= 0; i--) {
+        const seg = segments[i];
+        if (seg.x + seg.w < cameraX - 200) {
+          segments.splice(i, 1);
+          continue;
+        }
+
+        // 若是塌陷地板且已觸發
+        if (seg.type === 'crumble' && seg.triggered) {
+          seg.timer += dt;
+          if (seg.timer > 0.14) {
+            seg.fallY += 780 * dt;
+          }
+        }
+
+        const effectiveY = seg.y + seg.fallY;
+        if (seg.fallY > 180) continue; // 已完全掉入深淵不再提供支撐
+
+        // 水平重疊檢查
+        if (playerWorldX + player.w - 6 > seg.x && playerWorldX + 6 < seg.x + seg.w) {
+          // 從上方著陸
+          if (player.vy >= 0 && prevY + player.h <= effectiveY + 18 && player.y + player.h >= effectiveY) {
+            player.y = effectiveY - player.h;
+            if (!player.grounded) {
+              player.squashX = 1.25;
+              player.squashY = 0.78;
+              spawnParticles(player.x + player.w / 2, player.y + player.h, lvl.accent, 5, 0.5);
+            }
+            player.vy = 0;
+            onGround = true;
+            player.jumpsLeft = 2;
+
+            // 踩到偽裝塌陷地板！
+            if (seg.type === 'crumble' && !seg.triggered) {
+              seg.triggered = true;
+              sfx.playTrapTrigger();
+              spawnParticles(player.x + player.w / 2, effectiveY, '#fde047', 10, 0.8);
+            }
+          }
+          // 側面撞牆判定（台階高低差撞到側面）
+          else if (player.y + player.h > effectiveY + 12 && player.y < effectiveY + 60) {
+            triggerDeath('一頭撞上了突起的障礙物邊緣！');
+            return;
+          }
+        }
+      }
+
+      player.grounded = onGround;
+
+      // 掉落深淵判定
+      if (player.y > H + 40) {
+        triggerDeath('失足墜入了無底深淵！');
+        return;
+      }
+
+      // 2. 隱藏陷阱更新與碰撞判定
+      const pHitX = playerWorldX + 6;
+      const pHitY = player.y + 5;
+      const pHitW = player.w - 12;
+      const pHitH = player.h - 8;
+
+      for (let i = traps.length - 1; i >= 0; i--) {
+        const t = traps[i];
+        if (t.x + (t.w || t.r * 2 || 50) < cameraX - 250) {
+          traps.splice(i, 1);
+          continue;
+        }
+
+        const distToPlayer = t.x - playerWorldX;
+
+        if (t.type === 'popup_spike') {
+          // 靠近 145px 內瞬間彈出地刺！
+          if (!t.triggered && distToPlayer < 145 && distToPlayer > -40) {
+            t.triggered = true;
+            sfx.playTrapTrigger();
+            spawnParticles(t.x - cameraX + t.w / 2, t.y, '#f43f5e', 8, 0.7);
+          }
+          if (t.triggered) {
+            t.extend = Math.min(1, t.extend + dt * 11);
+          }
+          const spikeH = t.h * (t.triggered ? t.extend : 0.12);
+          if (spikeH > 8 && rectsOverlap(pHitX, pHitY, pHitW, pHitH, t.x + 6, t.y - spikeH + 4, t.w - 12, spikeH - 4)) {
+            triggerDeath('踩中了突然從地底冒出的隱藏尖刺！');
+            return;
+          }
+        } else if (t.type === 'falling_block') {
+          // 靠近 175px 內從頭頂急墜！
+          if (!t.triggered && distToPlayer < 175 && distToPlayer > -50) {
+            t.triggered = true;
+            sfx.playTrapTrigger();
+          }
+          if (t.triggered) {
+            t.vy += 2600 * dt;
+            t.y += t.vy * dt;
+            if (t.y >= t.targetY) {
+              t.y = t.targetY;
+              if (t.vy > 200) {
+                screenShake = Math.max(screenShake, 6);
+                spawnParticles(t.x - cameraX + t.w / 2, t.y + t.h, '#cbd5e1', 10, 0.8);
+              }
+              t.vy = 0;
+            }
+          }
+          if (rectsOverlap(pHitX, pHitY, pHitW, pHitH, t.x + 4, t.y + 4, t.w - 8, t.h - 8)) {
+            triggerDeath('被從天而降的突襲重物砸個正著！');
+            return;
+          }
+        } else if (t.type === 'invis_block') {
+          // 隱形撞頭磚：玩家跳躍碰觸時現形並阻擋動線
+          if (rectsOverlap(playerWorldX, player.y, player.w, player.h, t.x, t.y, t.w, t.h)) {
+            if (!t.revealed) {
+              t.revealed = true;
+              sfx.playTrapTrigger();
+              spawnParticles(t.x - cameraX + t.w / 2, t.y + t.h / 2, '#facc15', 12, 0.8);
+            }
+            // 從下方撞頭 -> 垂直速度歸零往下掉
+            if (player.vy < 0 && prevY >= t.y + t.h - 14) {
+              player.y = t.y + t.h;
+              player.vy = 140;
+            }
+            // 從上方踩上去 -> 當作臨時跳板
+            else if (player.vy >= 0 && prevY + player.h <= t.y + 14) {
+              player.y = t.y - player.h;
+              player.vy = 0;
+              player.grounded = true;
+              player.jumpsLeft = 2;
+            }
+          }
+        } else if (t.type === 'sawblade') {
+          if (!t.triggered && distToPlayer < 230) {
+            t.triggered = true;
+            t.vx = -210;
+            sfx.playTrapTrigger();
+          }
+          if (t.triggered) {
+            t.x += t.vx * dt;
+            t.angle -= dt * 14;
+          }
+          if (circleRectOverlap(t.x, t.y - t.r + 4, t.r - 3, pHitX, pHitY, pHitW, pHitH)) {
+            triggerDeath('被高速暴衝的隱藏圓鋸切成了兩半！');
+            return;
+          }
+        } else if (t.type === 'rolling_boulder') {
+          if (!t.triggered && distToPlayer < 360) {
+            t.triggered = true;
+            t.vx = -250;
+            sfx.playTrapTrigger();
+          }
+          if (t.triggered) {
+            t.x += t.vx * dt;
+            t.angle -= dt * 10;
+          }
+          if (circleRectOverlap(t.x, t.y, t.r - 4, pHitX, pHitY, pHitW, pHitH)) {
+            triggerDeath('被山坡上滾落的巨石無情輾過！');
+            return;
+          }
+        } else if (t.type === 'dart') {
+          if (!t.triggered && distToPlayer < 460) {
+            t.triggered = true;
+            t.vx = -440;
+            sfx.playTrapTrigger();
+          }
+          if (t.triggered) {
+            t.x += t.vx * dt;
+          }
+          if (rectsOverlap(pHitX, pHitY, pHitW, pHitH, t.x, t.y, t.w, t.h)) {
+            triggerDeath('閃避不及，中了神廟機關發射的冷箭！');
+            return;
+          }
+        }
+      }
+    }
+
+    // ==========================================
+    // 10. 畫面渲染引擎 (包含 10 種主題風格與暗夜遮罩)
+    // ==========================================
+    function drawBackground(lvl) {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, lvl.bgTop);
+      grad.addColorStop(1, lvl.bgBottom);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // 主題專屬背景裝飾
+      ctx.save();
+      bgDecor.forEach((d) => {
+        if (lvl.bgStyle === 'desert') {
+          // 金字塔剪影
+          ctx.fillStyle = 'rgba(180, 83, 9, 0.22)';
+          ctx.beginPath();
+          ctx.moveTo(d.x, H * 0.78);
+          ctx.lineTo(d.x + d.size * 1.4, H * 0.78 - d.size * 1.2);
+          ctx.lineTo(d.x + d.size * 2.8, H * 0.78);
+          ctx.closePath();
+          ctx.fill();
+        } else if (lvl.bgStyle === 'ice') {
+          // 冰山與雪花
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+          ctx.beginPath();
+          ctx.moveTo(d.x, H * 0.78);
+          ctx.lineTo(d.x + d.size, H * 0.78 - d.size * 1.5);
+          ctx.lineTo(d.x + d.size * 2, H * 0.78);
+          ctx.closePath();
+          ctx.fill();
+        } else if (lvl.bgStyle === 'sky') {
+          // 蓬鬆雲朵
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, d.size * 0.45, 0, Math.PI * 2);
+          ctx.arc(d.x + d.size * 0.35, d.y - 8, d.size * 0.38, 0, Math.PI * 2);
+          ctx.arc(d.x + d.size * 0.7, d.y, d.size * 0.42, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (lvl.bgStyle === 'snake') {
+          // 蛇肚肉壁脈動環
+          ctx.strokeStyle = 'rgba(251, 113, 133, 0.16)';
+          ctx.lineWidth = 14;
+          ctx.beginPath();
+          ctx.arc(d.x, H * 0.5, d.size * 2.2, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (lvl.bgStyle === 'concrete' || lvl.bgStyle === 'castle' || lvl.bgStyle === 'temple') {
+          // 建築柱子 / 遺跡高塔剪影
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+          ctx.fillRect(d.x, H * 0.25, d.size * 0.65, H * 0.6);
+        } else {
+          // 通用遠景幾何山巒
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.beginPath();
+          ctx.arc(d.x, H * 0.76, d.size * 1.3, Math.PI, 0);
+          ctx.fill();
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawGroundAndTraps(lvl) {
+      // 1. 繪製地面區塊
+      segments.forEach((seg) => {
+        const sx = seg.x - cameraX;
+        const sy = seg.y + seg.fallY;
+        if (sx + seg.w < -50 || sx > W + 50) return;
+
+        // 地面主體
+        ctx.fillStyle = lvl.groundBody;
+        ctx.fillRect(sx, sy, seg.w, H - sy + 100);
+
+        // 地面表層草皮/雪層/鋼板
+        ctx.fillStyle = lvl.groundTop;
+        ctx.fillRect(sx, sy, seg.w, 14);
+
+        // 若是「偽裝塌陷地板」，畫出細微的裂紋與色差作為「初見殺提示線索」！
+        if (seg.type === 'crumble') {
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.24)';
+          ctx.fillRect(sx, sy, seg.w, 14);
+
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(sx + seg.w * 0.25, sy);
+          ctx.lineTo(sx + seg.w * 0.35, sy + 12);
+          ctx.lineTo(sx + seg.w * 0.28, sy + 24);
+          ctx.moveTo(sx + seg.w * 0.7, sy);
+          ctx.lineTo(sx + seg.w * 0.62, sy + 14);
+          ctx.stroke();
+        }
+      });
+
+      // 2. 繪製陷阱
+      traps.forEach((t) => {
+        const tx = t.x - cameraX;
+        if (tx + 100 < -50 || tx > W + 150) return;
+
+        if (t.type === 'popup_spike') {
+          const spikeH = t.h * (t.triggered ? t.extend : 0.14);
+          const count = 3;
+          const sw = t.w / count;
+          ctx.fillStyle = t.triggered ? '#f43f5e' : 'rgba(244, 63, 94, 0.65)';
+          for (let k = 0; k < count; k++) {
+            ctx.beginPath();
+            ctx.moveTo(tx + k * sw, t.y);
+            ctx.lineTo(tx + k * sw + sw / 2, t.y - spikeH);
+            ctx.lineTo(tx + (k + 1) * sw, t.y);
+            ctx.closePath();
+            ctx.fill();
+          }
+        } else if (t.type === 'falling_block') {
+          ctx.fillStyle = lvl.id === 2 ? '#7dd3fc' : (lvl.id === 7 ? '#fb7185' : '#475569');
+          ctx.strokeStyle = '#f8fafc';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(tx, t.y, t.w, t.h, 6);
+          ctx.fill();
+          ctx.stroke();
+          // 危險警示符號
+          ctx.fillStyle = '#facc15';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('!', tx + t.w / 2, t.y + t.h / 2 + 6);
+        } else if (t.type === 'invis_block') {
+          if (t.revealed) {
+            ctx.fillStyle = '#facc15';
+            ctx.strokeStyle = '#713f12';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.roundRect(tx, t.y, t.w, t.h, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#713f12';
+            ctx.font = 'black 20px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('?', tx + t.w / 2, t.y + t.h / 2 + 7);
+          } else {
+            // 極微弱的空氣扭曲虛線提示，讓高手有跡可循
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(tx, t.y, t.w, t.h);
+            ctx.setLineDash([]);
+          }
+        } else if (t.type === 'sawblade') {
+          ctx.save();
+          ctx.translate(tx, t.y - t.r + 4);
+          ctx.rotate(t.angle);
+          ctx.fillStyle = '#e2e8f0';
+          ctx.beginPath();
+          const teeth = 10;
+          for (let k = 0; k < teeth * 2; k++) {
+            const rad = k % 2 === 0 ? t.r : t.r * 0.68;
+            const ang = (k * Math.PI) / teeth;
+            if (k === 0) ctx.moveTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
+            else ctx.lineTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(0, 0, t.r * 0.3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else if (t.type === 'rolling_boulder') {
+          ctx.save();
+          ctx.translate(tx, t.y);
+          ctx.rotate(t.angle);
+          ctx.fillStyle = '#57534e';
+          ctx.strokeStyle = '#292524';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, t.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          // 石頭紋理
+          ctx.fillStyle = '#78716c';
+          ctx.beginPath();
+          ctx.arc(-8, -6, 6, 0, Math.PI * 2);
+          ctx.arc(9, 7, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else if (t.type === 'dart') {
+          ctx.fillStyle = '#4ade80';
+          ctx.fillRect(tx, t.y + 3, t.w - 10, 4);
+          // 箭頭
+          ctx.fillStyle = '#f43f5e';
+          ctx.beginPath();
+          ctx.moveTo(tx, t.y + 5);
+          ctx.lineTo(tx + 12, t.y);
+          ctx.lineTo(tx + 12, t.y + 10);
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+    }
+
+    function drawPlayer() {
+      // 殘影
+      player.trail.forEach((tr) => {
+        ctx.fillStyle = `rgba(255, 255, 255, ${tr.alpha * 0.35})`;
+        ctx.beginPath();
+        ctx.roundRect(tr.x, tr.y, player.w, player.h, 8);
+        ctx.fill();
+      });
+
+      ctx.save();
+      const cx = player.x + player.w / 2;
+      const bottomY = player.y + player.h;
+      ctx.translate(cx, bottomY);
+      ctx.scale(player.squashX, player.squashY);
+
+      // 跑酷小人身體
+      ctx.fillStyle = '#38bdf8';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.roundRect(-player.w / 2, -player.h, player.w, player.h - 6, 9);
+      ctx.fill();
+      ctx.stroke();
+
+      // 帥氣護目鏡/眼睛
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(-2, -player.h + 10, 16, 8);
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(6, -player.h + 12, 6, 4);
+
+      // 飄揚紅圍巾
+      const scarfWave = Math.sin(player.runCycle * 1.3) * 4;
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.moveTo(-player.w / 2, -player.h + 20);
+      ctx.lineTo(-player.w / 2 - 16, -player.h + 18 + scarfWave);
+      ctx.lineTo(-player.w / 2 - 14, -player.h + 26 + scarfWave);
+      ctx.lineTo(-player.w / 2, -player.h + 26);
+      ctx.closePath();
+      ctx.fill();
+
+      // 奔跑雙腳動畫
+      const legSwing = player.grounded ? Math.sin(player.runCycle) * 7 : 5;
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(-9 + legSwing, -7, 7, 7);
+      ctx.fillRect(2 - legSwing, -7, 7, 7);
+
+      ctx.restore();
+    }
+
+    function drawParticlesAndDarkness(lvl) {
+      // 粒子
+      particles.forEach((p) => {
+        ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+
+      // 第 8 關「暗夜城堡」與第 10 關「綜合地獄」的黑暗視野遮罩
+      if (gameState === 'PLAYING' && lvl.darkness) {
+        let radius = 235;
+        if (lvl.darkness === 'pulse') {
+          // 第 10 關週期性暗夜干擾
+          const wave = Math.sin(distance * 0.012);
+          if (wave < 0.25) return; // 亮起時無遮罩
+          radius = 270 - (wave - 0.25) * 90;
+        }
+
+        const px = player.x + player.w / 2;
+        const py = player.y + player.h / 2;
+        const darkGrad = ctx.createRadialGradient(px, py, radius * 0.35, px, py, radius);
+        darkGrad.addColorStop(0, 'rgba(9, 13, 22, 0)');
+        darkGrad.addColorStop(0.75, 'rgba(9, 13, 22, 0.78)');
+        darkGrad.addColorStop(1, 'rgba(9, 13, 22, 0.96)');
+
+        ctx.fillStyle = darkGrad;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    function render() {
+      const lvl = LEVELS[currentLevelIdx];
+      ctx.save();
+
+      if (screenShake > 0) {
+        const dx = (Math.random() - 0.5) * screenShake;
+        const dy = (Math.random() - 0.5) * screenShake;
+        ctx.translate(dx, dy);
+      }
+
+      drawBackground(lvl);
+      drawGroundAndTraps(lvl);
+      if (gameState !== 'DEAD') {
+        drawPlayer();
+      }
+      drawParticlesAndDarkness(lvl);
+
+      ctx.restore();
+    }
+
+    // ==========================================
+    // 11. 啟動遊戲主迴圈
+    // ==========================================
+    function gameLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+      lastTime = timestamp;
+
+      update(dt);
+      render();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    window.onload = function () {
+      renderLevelGrid();
+      requestAnimationFrame(gameLoop);
+    };
+  </script>
+</body>
+</html>
